@@ -1,11 +1,6 @@
-(defproject com.google/kythe-xrefs-ui "0.1.0"
+(defproject org.dolphin-emu/codesearch-ui "0.0.1"
   :description "Browser UI for a Kythe xrefs server. Decorates files with anchors for cross-references and node information"
   :url "http://kythe.io"
-  :mailing-list {:name "Kythe Community"
-                 :archive "https://groups.google.com/group/kythe"
-                 :post "https://groups.google.com/group/kythe/post"
-                 :subscribe "http://groups.google.com/group/kythe/boxsubscribe"
-                 :unsubscribe "http://groups.google.com/group/kythe/boxsubscribe"}
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [org.clojure/clojurescript "0.0-2371"
                   :exclusions [org.apache.ant/ant]]
