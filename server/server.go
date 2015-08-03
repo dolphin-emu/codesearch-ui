@@ -28,10 +28,10 @@ import (
 
 	"kythe.io/kythe/go/services/filetree"
 	"kythe.io/kythe/go/services/graphstore"
-	"kythe.io/kythe/go/services/search"
+	esearch "kythe.io/kythe/go/services/search"
 	"kythe.io/kythe/go/services/xrefs"
 	ftsrv "kythe.io/kythe/go/serving/filetree"
-	srchsrv "kythe.io/kythe/go/serving/search"
+	esrchsrv "kythe.io/kythe/go/serving/search"
 	xsrv "kythe.io/kythe/go/serving/xrefs"
 	"kythe.io/kythe/go/storage/gsutil"
 	"kythe.io/kythe/go/storage/leveldb"
@@ -70,9 +70,9 @@ func main() {
 	}
 
 	var (
-		xs xrefs.Service
-		ft filetree.Service
-		sr search.Service
+		xs  xrefs.Service
+		ft  filetree.Service
+		esr esearch.Service
 	)
 
 	ctx := context.Background()
@@ -85,7 +85,7 @@ func main() {
 		tbl := &table.KVProto{db}
 		xs = &xsrv.Table{tbl}
 		ft = &ftsrv.Table{tbl}
-		sr = &srchsrv.Table{&table.KVInverted{db}}
+		esr = &esrchsrv.Table{&table.KVInverted{db}}
 	} else {
 		log.Println("WARNING: serving directly from a GraphStore can be slow; you may want to use a --serving_table")
 		if f, ok := gs.(filetree.Service); ok {
@@ -109,21 +109,21 @@ func main() {
 			xs = xstore.NewGraphStoreService(gs)
 		}
 
-		if s, ok := gs.(search.Service); ok {
-			log.Printf("Using %T directly as search service", gs)
-			sr = s
+		if s, ok := gs.(esearch.Service); ok {
+			log.Printf("Using %T directly as entity search service", gs)
+			esr = s
 		}
 	}
 
-	if sr == nil {
-		log.Println("Search API not supported")
+	if esr == nil {
+		log.Println("Entity search API not supported")
 	}
 
 	if *httpListeningAddr != "" {
 		xrefs.RegisterHTTPHandlers(ctx, xs, http.DefaultServeMux)
 		filetree.RegisterHTTPHandlers(ctx, ft, http.DefaultServeMux)
-		if sr != nil {
-			search.RegisterHTTPHandlers(ctx, sr, http.DefaultServeMux)
+		if esr != nil {
+			esearch.RegisterHTTPHandlers(ctx, esr, http.DefaultServeMux)
 		}
 		go startHTTP()
 	}
