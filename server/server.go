@@ -26,6 +26,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/dolphin-emu/codesearch-ui/server/codesearch"
+
 	"kythe.io/kythe/go/services/filetree"
 	"kythe.io/kythe/go/services/graphstore"
 	esearch "kythe.io/kythe/go/services/search"
@@ -48,6 +50,7 @@ import (
 var (
 	gs           graphstore.Service
 	servingTable = flag.String("serving_table", "", "LevelDB serving table")
+	csIndex      = flag.String("csearch_index", "", "Codesearch index file")
 
 	httpListeningAddr = flag.String("listen", "localhost:8080", "Listening address for HTTP server")
 	publicResources   = flag.String("public_resources", "", "Path to directory of static resources to serve")
@@ -56,7 +59,7 @@ var (
 func init() {
 	gsutil.Flag(&gs, "graphstore", "GraphStore to serve xrefs")
 	flag.Usage = flagutil.SimpleUsage("Exposes HTTP interfaces for the search, xrefs, and filetree services",
-		"(--graphstore spec | --serving_table path) [--listen addr] [--public_resources dir]")
+		"(--graphstore spec | --serving_table path) [--csearch_index file] [--listen addr] [--public_resources dir]")
 }
 
 func main() {
@@ -73,6 +76,7 @@ func main() {
 		xs  xrefs.Service
 		ft  filetree.Service
 		esr esearch.Service
+		csr codesearch.Service
 	)
 
 	ctx := context.Background()
@@ -86,6 +90,10 @@ func main() {
 		xs = &xsrv.Table{tbl}
 		ft = &ftsrv.Table{tbl}
 		esr = &esrchsrv.Table{&table.KVInverted{db}}
+
+		if *csIndex != "" {
+			csr = codesearch.New(*csIndex, xs)
+		}
 	} else {
 		log.Println("WARNING: serving directly from a GraphStore can be slow; you may want to use a --serving_table")
 		if f, ok := gs.(filetree.Service); ok {
@@ -118,12 +126,18 @@ func main() {
 	if esr == nil {
 		log.Println("Entity search API not supported")
 	}
+	if csr == nil {
+		log.Println("Code search API not supported")
+	}
 
 	if *httpListeningAddr != "" {
 		xrefs.RegisterHTTPHandlers(ctx, xs, http.DefaultServeMux)
 		filetree.RegisterHTTPHandlers(ctx, ft, http.DefaultServeMux)
 		if esr != nil {
 			esearch.RegisterHTTPHandlers(ctx, esr, http.DefaultServeMux)
+		}
+		if csr != nil {
+			codesearch.RegisterHTTPHandlers(ctx, csr, http.DefaultServeMux)
 		}
 		go startHTTP()
 	}
