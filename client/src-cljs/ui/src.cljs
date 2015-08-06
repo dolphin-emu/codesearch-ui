@@ -134,8 +134,7 @@
     (render-state [_ {:keys [xrefs-to-view hover]}]
       (let [{:keys [:start :end :anchor-ticket :target-ticket :text :background]} state]
         (if anchor-ticket
-          (dom/a #js {:title target-ticket
-                      :href "#"
+          (dom/a #js {:href "#"
                       :onClick (fn [e]
                                  (put! xrefs-to-view target-ticket)
                                  (.preventDefault e))
