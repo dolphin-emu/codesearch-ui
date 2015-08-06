@@ -17,6 +17,7 @@
 package codesearch
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"log"
@@ -28,6 +29,7 @@ import (
 
 	"kythe.io/kythe/go/services/web"
 	"kythe.io/kythe/go/services/xrefs"
+	xpb "kythe.io/kythe/proto/xref_proto"
 
 	"golang.org/x/net/context"
 )
@@ -47,11 +49,71 @@ func (r *Regexp) Compile() (*regexp.Regexp, error) {
 	if r.Expr == "" {
 		return nil, errors.New("Empty search regexp provided.")
 	}
-	expr := "(?m)" + r.Expr
+	expr := r.Expr
 	if r.CaseSensitive {
 		expr = "(?i)" + expr
 	}
 	return regexp.Compile(expr)
+}
+
+func (s *localImpl) ReadFileContents(ctx context.Context, ticket string) ([]byte, error) {
+	req := xpb.DecorationsRequest{
+		Location: &xpb.Location{
+			Ticket: ticket,
+			Kind:   xpb.Location_FILE,
+		},
+		SourceText: true,
+		References: false,
+	}
+	repl, err := s.xs.Decorations(ctx, &req)
+	if err != nil {
+		return nil, fmt.Errorf("Decorations request failed: %v", err)
+	}
+	return repl.SourceText, nil
+}
+
+func countNL(b []byte) int {
+	n := 0
+	for {
+		i := bytes.IndexByte(b, '\n')
+		if i < 0 {
+			break
+		}
+		n++
+		b = b[i+1:]
+	}
+	return n
+}
+
+func GetSnippets(data []byte, re *regexp.Regexp, nSnippets int) []*Snippet {
+	var (
+		s          = []*Snippet{}
+		chunkStart = 0
+		lineNo     = 1
+	)
+	for chunkStart < len(data) {
+		if len(s) >= nSnippets {
+			break
+		}
+		mIdx := re.Match(data[chunkStart:], true, true) + chunkStart
+		if mIdx < chunkStart {
+			break
+		}
+		lineStart := bytes.LastIndex(data[chunkStart:mIdx], []byte("\n")) + 1 + chunkStart
+		lineEnd := mIdx
+		if lineEnd > len(data) {
+			lineEnd = len(data)
+		}
+		lineNo += countNL(data[chunkStart:lineStart])
+		line := string(data[lineStart:lineEnd])
+		snip := &Snippet{
+			Content:    line,
+			LineNumber: int32(lineNo),
+		}
+		s = append(s, snip)
+		chunkStart = lineEnd
+	}
+	return s
 }
 
 func (s *localImpl) Search(ctx context.Context, req *CodeSearchRequest) (*CodeSearchReply, error) {
@@ -65,11 +127,21 @@ func (s *localImpl) Search(ctx context.Context, req *CodeSearchRequest) (*CodeSe
 	}
 	q := index.RegexpQuery(re.Syntax)
 	for _, fileid := range s.ix.PostingQuery(q) {
+		// TODO(delroth): Apply pagination.
+		// TODO(delroth): Sort the filenames by relevance.
 		// TODO(delroth): File RE should be applied here.
-		m := new(Match)
-		m.Filename = s.ix.Name(fileid)
-		// TODO(delroth): Extract snippets.
-		reply.Match = append(reply.Match, m)
+		fn := s.ix.Name(fileid)
+		data, err := s.ReadFileContents(ctx, fn)
+		if err != nil {
+			return nil, fmt.Errorf("Search in file contents failed: %v", err)
+		}
+		m := &Match{
+			Filename: fn,
+			Snippet:  GetSnippets(data, re, 5),
+		}
+		if len(m.Snippet) > 0 {
+			reply.Match = append(reply.Match, m)
+		}
 	}
 	return &reply, nil
 }
