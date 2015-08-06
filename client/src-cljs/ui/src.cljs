@@ -14,12 +14,13 @@
 (ns ui.src
   "View for source pane"
   (:require [cljs.core.async :refer [put!]]
+            [goog.string :as string]
             [goog.crypt.base64 :as b64]
             [om.core :as om :include-macros true]
             [om.dom :as dom :include-macros true]
             [ui.schema :as schema]
             [ui.service :as service]
-            [ui.util :refer [fix-encoding handle-ch]]))
+            [ui.util :refer [fix-encoding handle-ch ticket->vname]]))
 
 (defn- overlay-anchors
   "Reduces each group of overlapping anchors into a series of non-overlapping anchors and concats
@@ -85,6 +86,33 @@
 
 (defn- count-lines [text] (count (.split text "\n")))
 
+(defn- builtin-ticket
+  "Returns whether a ticket refers to a builtin value."
+  [ticket]
+  (let [{:keys [:corpus :path :signature]} (ticket->vname ticket)]
+    (and (string/isEmptySafe corpus)
+         (string/isEmptySafe path)
+         (string/contains signature "#builtin"))))
+
+(defn- interesting-anchor
+  "Returns whether an anchor is interesting enough to be included."
+  [nodes {:keys [:anchor-ticket :ref-kind :target-ticket]}]
+  (let [facts (get nodes target-ticket)]
+    (and
+      facts
+      ;; No builtins for some ref-kinds.
+      (not (and
+             (builtin-ticket target-ticket)
+             (contains?
+               #{"tapp"}
+               (get facts schema/node-kind-fact))))
+      (not (contains?
+             #{"/kythe/edge/documents"}
+             ref-kind))
+      (not (contains?
+             #{"UNKNOWN" "callable"}
+             (get facts schema/node-kind-fact))))))
+
 (defn construct-decorations
   "Returns a seq of precomputed text/anchors to display as the source-text"
   [decorations]
@@ -100,15 +128,17 @@
                  (:reference decorations)))
         anchors (mapcat overlay-anchors
                   (group-overlapping-anchors
-                    (filter (fn [{:keys [:start :end]}]
-                              (and start end (< start end)))
-                      (map (fn [[ticket {start schema/anchor-start
-                                         end schema/anchor-end}]]
-                             {:start (js/parseInt start)
-                              :end (js/parseInt end)
-                              :anchor-ticket ticket
-                              :target-ticket (:ticket (get refs ticket))})
-                        (schema/filter-nodes-by-kind "anchor" nodes)))))]
+                    (filter (partial interesting-anchor nodes)
+                      (filter (fn [{:keys [:start :end]}]
+                                (and start end (< start end)))
+                        (map (fn [[ticket {start schema/anchor-start
+                                           end schema/anchor-end}]]
+                               {:start (js/parseInt start)
+                                :end (js/parseInt end)
+                                :anchor-ticket ticket
+                                :ref-kind (:kind (get refs ticket))
+                                :target-ticket (:ticket (get refs ticket))})
+                          (schema/filter-nodes-by-kind "anchor" nodes))))))]
     {:source-text src
      :num-lines (count-lines src)
      :nodes
